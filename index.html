@@ -1,0 +1,1096 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YouTube Channel Tracker</title>
+  <!-- Offline: Tailwind precompiled locally (no CDN) -->
+  <link rel="stylesheet" href="tailwind.css">
+  <style>
+    /* Offline: Inter font bundled locally (no Google Fonts) */
+    @font-face { font-family: 'Inter'; font-style: normal; font-weight: 400; font-display: swap; src: url('fonts/inter-400.woff2') format('woff2'); }
+    @font-face { font-family: 'Inter'; font-style: normal; font-weight: 500; font-display: swap; src: url('fonts/inter-500.woff2') format('woff2'); }
+    @font-face { font-family: 'Inter'; font-style: normal; font-weight: 600; font-display: swap; src: url('fonts/inter-600.woff2') format('woff2'); }
+    @font-face { font-family: 'Inter'; font-style: normal; font-weight: 700; font-display: swap; src: url('fonts/inter-700.woff2') format('woff2'); }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+      background-color: #f1f5f9;
+      color: #0f172a;
+    }
+    .sheet-table { border-collapse: collapse; width: 100%; background: #ffffff; }
+    .sheet-table th {
+      background-color: #e2e8f0; color: #1e293b; font-weight: 700; font-size: 11.5px;
+      border: 1px solid #cbd5e1; padding: 8px 8px; text-align: left; white-space: nowrap;
+    }
+    .sheet-table td { border: 1px solid #cbd5e1; padding: 5px 7px; font-size: 12.5px; vertical-align: top; }
+    .sheet-table tr:hover td { background-color: #f8fafc; }
+    .row-num {
+      background-color: #e2e8f0 !important; color: #475569; font-weight: 700; text-align: center;
+      width: 34px; user-select: none; vertical-align: middle !important;
+    }
+    .cell-input {
+      width: 100%; background: #ffffff; border: 1px solid #cbd5e1; padding: 4px 6px;
+      border-radius: 4px; font-size: 12px; color: #0f172a;
+    }
+    .cell-input:focus { outline: none; border-color: #16a34a; box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.15); }
+    .cell-flat {
+      width: 100%; background: transparent; border: 1px solid transparent; padding: 3px 5px;
+      border-radius: 4px; font-size: 12px; color: #0f172a;
+    }
+    .cell-flat:hover { border-color: #cbd5e1; background: #ffffff; }
+    .cell-flat:focus { outline: none; background: #ffffff; border-color: #16a34a; }
+  </style>
+  <!-- Config (role / syncUrl / adminPassword) is injected by the Electron preload as window.APP_CONFIG -->
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <!-- ================= TOP BAR ================= -->
+  <header class="bg-emerald-700 text-white px-4 py-2.5 shadow flex flex-wrap items-center justify-between gap-3">
+    <div class="flex items-center gap-2.5">
+      <div class="w-7 h-7 rounded bg-white text-emerald-700 flex items-center justify-center font-black text-sm shadow-sm">⊞</div>
+      <h1 id="headerTitle" class="text-sm sm:text-base font-bold">YouTube Channel Tracker</h1>
+      <span id="cloudStatusBadge" class="text-[11px] px-2 py-0.5 rounded bg-emerald-800 text-emerald-200 border border-emerald-600">Local Mode</span>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-2">
+      <div id="memberSwitcherWrap" class="flex items-center bg-emerald-800 rounded-lg p-1 border border-emerald-600">
+        <span class="text-[11px] px-2 text-emerald-100 font-medium">Member:</span>
+        <select id="selectActiveMember" onchange="switchMemberView(this.value)" class="bg-white text-slate-900 text-xs font-bold px-2.5 py-1 rounded cursor-pointer focus:outline-none"></select>
+      </div>
+
+      <button onclick="syncNowWithCloud()" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-800 hover:bg-emerald-900 text-white border border-emerald-500/50 transition">Sync Now</button>
+
+      <button id="btnToggleBackend" onclick="openAdminBackend()" class="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-amber-400 hover:bg-amber-300 text-slate-950 shadow-sm transition">Admin Panel</button>
+
+      <button onclick="exportAllCSV()" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-900/80 hover:bg-emerald-950 text-white border border-emerald-500/40 transition">Export CSV</button>
+    </div>
+  </header>
+
+  <!-- ================= VIEW 1: MEMBER SHEET ================= -->
+  <main id="viewMemberSheet" class="flex-1 max-w-[1400px] w-full mx-auto px-3 sm:px-5 py-4 space-y-5">
+
+    <div class="bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 shadow-sm flex flex-wrap items-center justify-between gap-2">
+      <span id="memberBadgeName" class="px-3 py-1 rounded bg-emerald-100 text-emerald-900 font-bold text-xs sm:text-sm border border-emerald-300">Member: Ali</span>
+      <div id="memberStatsBadge" class="text-xs font-bold text-slate-700 bg-slate-100 px-3 py-1 rounded border border-slate-300">Channels: 0 | Uploaded: 0 | Editing: 0</div>
+    </div>
+
+    <datalist id="dlMemberDevices"></datalist>
+    <datalist id="dlMemberChannels"></datalist>
+    <datalist id="dlMemberCompetitors"></datalist>
+
+    <section class="space-y-1.5">
+      <h2 class="text-xs sm:text-sm font-bold text-slate-800">Channels &amp; Competitors</h2>
+      <div class="overflow-x-auto shadow-sm rounded-lg border border-slate-300 bg-white">
+        <table class="sheet-table">
+          <thead>
+            <tr>
+              <th class="row-num">#</th>
+              <th style="min-width: 150px;">Device</th>
+              <th style="min-width: 170px;">My Channel</th>
+              <th style="min-width: 210px;">My Channel Link</th>
+              <th style="min-width: 420px;">Competitors (Name &amp; Link)</th>
+              <th style="width: 85px; text-align: center;">Action</th>
+            </tr>
+          </thead>
+          <tbody id="memberChannelsSheetBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="space-y-1.5">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h2 class="text-xs sm:text-sm font-bold text-slate-800">Daily Videos</h2>
+        <input id="memberSearchBox" type="text" oninput="renderApp()" placeholder="Search..." class="bg-white border border-slate-300 rounded px-3 py-1 text-xs w-52 focus:outline-none focus:border-emerald-600" />
+      </div>
+
+      <div id="dupAlertBar" class="hidden bg-red-600 text-white text-xs font-bold px-4 py-2 rounded shadow">Duplicate video link already exists!</div>
+
+      <div class="overflow-x-auto shadow-sm rounded-lg border border-slate-300 bg-white">
+        <table class="sheet-table">
+          <thead>
+            <tr>
+              <th class="row-num">#</th>
+              <th style="width: 110px;">Date</th>
+              <th style="min-width: 140px;">Device</th>
+              <th style="min-width: 155px;">My Channel</th>
+              <th style="min-width: 185px;">My Channel Link</th>
+              <th style="min-width: 155px;">Competitor</th>
+              <th style="min-width: 185px;">Competitor Link</th>
+              <th style="min-width: 195px;">Video Link / Title</th>
+              <th style="width: 120px;">Status</th>
+              <th style="width: 80px; text-align: center;">Action</th>
+            </tr>
+          </thead>
+          <tbody id="memberVideosSheetBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- ================= VIEW 2: ADMIN PANEL ================= -->
+  <main id="viewAdminBackend" class="hidden flex-1 max-w-[1400px] w-full mx-auto px-3 sm:px-5 py-4 space-y-5">
+
+    <div class="bg-slate-900 text-white rounded-lg px-4 py-3 shadow flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-2">
+        <span class="px-2 py-0.5 rounded bg-amber-400 text-slate-950 font-black text-xs">ADMIN</span>
+        <h2 class="text-sm sm:text-base font-bold">Admin Panel</h2>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <button onclick="switchToMemberSheetFromAdmin()" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-800 hover:bg-slate-700 text-white border border-slate-600">Back to Sheet</button>
+        <button onclick="resetSampleData()" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-rose-900/70 hover:bg-rose-800 text-rose-200 border border-rose-700">Reset Data</button>
+      </div>
+    </div>
+
+    <div class="bg-white border border-slate-300 rounded-lg p-3 shadow-sm flex flex-wrap items-center justify-between gap-3">
+      <div class="flex flex-wrap items-center gap-2 flex-1 min-w-[260px]">
+        <span class="text-xs font-bold text-slate-800">Cloud Sync URL:</span>
+        <input id="adminSyncApiInput" type="url" placeholder="Paste Google Apps Script Web App URL..." class="bg-slate-50 border border-slate-300 rounded px-2.5 py-1 text-xs flex-1" />
+        <button onclick="saveCloudSyncUrl()" class="px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold">Save Sync URL</button>
+        <button onclick="copyCloudScript()" class="px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold">Copy Sync Script</button>
+      </div>
+      <div class="flex flex-wrap items-center gap-1.5">
+        <input id="adminSheetUrlInput" type="url" placeholder="Google Sheet URL..." class="bg-slate-50 border border-slate-300 rounded px-2.5 py-1 text-xs w-48" />
+        <button onclick="saveAdminSheetLink()" class="px-2.5 py-1 rounded bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-semibold">Save</button>
+        <button onclick="openAdminSheetLink()" class="px-2.5 py-1 rounded bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-semibold">Open ↗</button>
+      </div>
+    </div>
+
+    <section class="space-y-1.5">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h3 class="text-xs sm:text-sm font-bold text-slate-800">Team Summary</h3>
+        <div class="flex items-center gap-2">
+          <input id="newTeamMemberInput" type="text" placeholder="Member name..." class="bg-white border border-slate-300 rounded px-3 py-1 text-xs" />
+          <button onclick="addNewMemberInline()" class="px-3 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold">+ Add Member</button>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto shadow-sm rounded-lg border border-slate-300 bg-white">
+        <table class="sheet-table">
+          <thead>
+            <tr>
+              <th class="row-num">#</th>
+              <th>Member</th>
+              <th>Devices</th>
+              <th>My Channels</th>
+              <th>Competitors</th>
+              <th>Uploaded</th>
+              <th>Editing</th>
+              <th>Open</th>
+            </tr>
+          </thead>
+          <tbody id="adminMemberReportRows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="flex items-center gap-2">
+      <span class="text-xs font-bold text-slate-700">Filter Member:</span>
+      <select id="adminFilterMemberSelect" onchange="renderApp()" class="bg-white border border-slate-300 rounded px-3 py-1 text-xs font-bold">
+        <option value="ALL">All Members</option>
+      </select>
+    </div>
+
+    <section class="space-y-1.5">
+      <h3 class="text-xs sm:text-sm font-bold text-slate-800">All Channels &amp; Competitors</h3>
+      <div class="overflow-x-auto shadow-sm rounded-lg border border-slate-300 bg-white">
+        <table class="sheet-table">
+          <thead>
+            <tr>
+              <th class="row-num">#</th>
+              <th>Member</th>
+              <th>Device</th>
+              <th>My Channel</th>
+              <th>My Channel Link</th>
+              <th>Competitors</th>
+              <th style="width: 70px; text-align: center;">Action</th>
+            </tr>
+          </thead>
+          <tbody id="adminMasterChannelsRows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="space-y-1.5">
+      <h3 class="text-xs sm:text-sm font-bold text-slate-800">All Videos</h3>
+      <div class="overflow-x-auto shadow-sm rounded-lg border border-slate-300 bg-white">
+        <table class="sheet-table">
+          <thead>
+            <tr>
+              <th class="row-num">#</th>
+              <th>Date</th>
+              <th>Member</th>
+              <th>Device</th>
+              <th>My Channel</th>
+              <th>Competitor</th>
+              <th>Video Link / Title</th>
+              <th>Status</th>
+              <th style="width: 70px; text-align: center;">Action</th>
+            </tr>
+          </thead>
+          <tbody id="adminMasterVideosRows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- ================= MEMBER FIRST-RUN SETUP OVERLAY ================= -->
+  <div id="memberSetupOverlay" class="hidden fixed inset-0 z-[60] bg-slate-900/95 flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
+      <div class="flex items-center gap-2">
+        <div class="w-8 h-8 rounded bg-emerald-600 text-white flex items-center justify-center font-black">⊞</div>
+        <h2 class="text-lg font-bold text-slate-900">Welcome — One-time Setup</h2>
+      </div>
+      <p class="text-xs text-slate-500">Admin se mila hua <b>Sync URL</b> paste karein, phir <b>Connect</b> dabayein aur apna naam chunein. Ye sirf pehli dafa karna hai.</p>
+      <div id="setupUrlStep">
+        <div>
+          <label class="text-xs font-bold text-slate-700">Cloud Sync URL</label>
+          <input id="setupSyncUrl" type="url" placeholder="https://script.google.com/macros/s/.../exec" class="cell-input mt-1" />
+        </div>
+        <button id="setupConnectBtn" onclick="setupConnect()" class="w-full mt-2 px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold">Connect</button>
+      </div>
+
+      <div id="setupMemberPick" class="hidden space-y-2 pt-1 border-t border-slate-200">
+        <label class="text-xs font-bold text-slate-700">Apna Naam (admin ne jo rakha hai bilkul wahi)</label>
+        <input id="setupMemberName" type="text" placeholder="e.g. Ali" class="cell-input" />
+        <div id="setupMemberChips" class="flex flex-wrap gap-1.5"></div>
+        <button onclick="setupFinish()" class="w-full px-3 py-2 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold">Start Tracking</button>
+      </div>
+      <p id="setupMsg" class="text-xs text-rose-600 min-h-[14px]"></p>
+    </div>
+  </div>
+
+  <!-- ================= ADMIN PASSWORD LOCK ================= -->
+  <div id="adminLockOverlay" class="hidden fixed inset-0 z-[70] bg-slate-900 flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+      <div class="flex items-center gap-2">
+        <span class="px-2 py-0.5 rounded bg-amber-400 text-slate-950 font-black text-xs">ADMIN</span>
+        <h2 class="text-lg font-bold text-slate-900">Admin Login</h2>
+      </div>
+      <p class="text-xs text-slate-500">Ye app sirf admin ke liye hai. Password daal kar unlock karein.</p>
+      <input id="adminPassInput" type="password" onkeydown="if(event.key==='Enter') adminUnlock()" placeholder="Password" class="cell-input" />
+      <button onclick="adminUnlock()" class="w-full px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold">Unlock</button>
+      <p id="adminLockMsg" class="text-xs text-rose-600 min-h-[14px]"></p>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toastBox" class="fixed bottom-4 right-4 z-50 hidden px-4 py-2 rounded-lg bg-slate-900 text-white text-xs font-semibold shadow-lg">
+    <span id="toastText">Saved</span>
+  </div>
+
+  <script>
+    // ================= ROLE / CONFIG (baked at build time) =================
+    const APP_ROLE = (window.APP_CONFIG && window.APP_CONFIG.role) || 'admin';
+    const BAKED_SYNC_URL = (window.APP_CONFIG && window.APP_CONFIG.syncUrl) || '';
+    const ADMIN_PASSWORD = (window.APP_CONFIG && window.APP_CONFIG.adminPassword) || '';
+    const URL_MEMBER_PARAM = new URLSearchParams(window.location.search).get('member');
+
+    const SETUP_KEY = 'yt_tracker_setup_v1';
+    function loadSetup() { try { return JSON.parse(localStorage.getItem(SETUP_KEY)) || {}; } catch (e) { return {}; } }
+    function saveSetup() { try { localStorage.setItem(SETUP_KEY, JSON.stringify(setup)); } catch (e) {} }
+    let setup = loadSetup();
+
+    const STORAGE_KEY = (APP_ROLE === 'member') ? 'yt_tracker_state_member_v5' : 'yt_tracker_state_admin_v5';
+
+    // Member app is locked to its chosen member; admin app is never locked.
+    let LOCKED_MEMBER = (APP_ROLE === 'member') ? (setup.member || null) : (URL_MEMBER_PARAM || null);
+
+    const INITIAL_DUMMY_DATA = {
+      sheetUrl: '',
+      syncApiUrl: '',
+      members: ['Ali', 'Bilal', 'Usman'],
+      channels: [
+        { id: 'CH-101', member: 'Ali', device: 'iPhone 13 Pro', myChannelName: 'FactVerse', myChannelLink: 'https://www.youtube.com/@FactVerse',
+          competitors: [ { name: 'Zack D. Films', link: 'https://www.youtube.com/@zackdfilms' }, { name: 'AiTelly 3D', link: 'https://www.youtube.com/@AiTelly' } ] },
+        { id: 'CH-102', member: 'Ali', device: 'iPad Mini 6', myChannelName: 'Mystery Files', myChannelLink: 'https://www.youtube.com/@MysteryFiles',
+          competitors: [ { name: 'BrightSide', link: 'https://www.youtube.com/@BRIGHTSIDEOFFICIAL' } ] },
+        { id: 'CH-103', member: 'Bilal', device: 'Office PC-02', myChannelName: 'AutoGear Studio', myChannelLink: 'https://www.youtube.com/@AutoGearStudio',
+          competitors: [ { name: 'Supercar Blondie', link: 'https://www.youtube.com/@SupercarBlondie' }, { name: 'Carwow', link: 'https://www.youtube.com/@carwow' } ] },
+        { id: 'CH-104', member: 'Usman', device: 'Samsung S21', myChannelName: 'TechGadgetry Hub', myChannelLink: 'https://www.youtube.com/@TechGadgetryHub',
+          competitors: [ { name: 'Mavigadget', link: 'https://www.youtube.com/@Mavigadget' } ] }
+      ],
+      videos: [
+        { id: 'VID-201', date: '2026-10-23', member: 'Ali', device: 'iPhone 13 Pro', myChannelName: 'FactVerse', myChannelLink: 'https://www.youtube.com/@FactVerse', compName: 'Zack D. Films', compLink: 'https://www.youtube.com/@zackdfilms', videoLink: 'https://www.youtube.com/shorts/zackd_jet01', status: 'Uploaded' },
+        { id: 'VID-202', date: '2026-10-23', member: 'Ali', device: 'iPhone 13 Pro', myChannelName: 'FactVerse', myChannelLink: 'https://www.youtube.com/@FactVerse', compName: 'AiTelly 3D', compLink: 'https://www.youtube.com/@AiTelly', videoLink: 'https://www.youtube.com/watch?v=aitelly_sub99', status: 'Editing' },
+        { id: 'VID-203', date: '2026-10-23', member: 'Bilal', device: 'Office PC-02', myChannelName: 'AutoGear Studio', myChannelLink: 'https://www.youtube.com/@AutoGearStudio', compName: 'Supercar Blondie', compLink: 'https://www.youtube.com/@SupercarBlondie', videoLink: 'https://www.youtube.com/shorts/scb_rolls22', status: 'Uploaded' },
+        { id: 'VID-204', date: '2026-10-23', member: 'Usman', device: 'Samsung S21', myChannelName: 'TechGadgetry Hub', myChannelLink: 'https://www.youtube.com/@TechGadgetryHub', compName: 'Mavigadget', compLink: 'https://www.youtube.com/@Mavigadget', videoLink: 'https://www.youtube.com/shorts/mavi_88', status: 'Uploaded' }
+      ]
+    };
+
+    // Member app starts empty (no dummy data) — fills from cloud.
+    const EMPTY_DATA = { sheetUrl: '', syncApiUrl: '', members: [], channels: [], videos: [] };
+
+    let state = loadState();
+    if (setup.syncUrl && !state.syncApiUrl) state.syncApiUrl = setup.syncUrl;
+
+    let activeMember = LOCKED_MEMBER || (state.members[0] || 'Ali');
+    let currentView = 'MEMBER_SHEET';
+    let draftNewCompetitors = [{ name: '', link: '' }];
+
+    function loadState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && Array.isArray(parsed.channels)) return parsed;
+        }
+      } catch (e) {}
+      return JSON.parse(JSON.stringify(APP_ROLE === 'member' ? EMPTY_DATA : INITIAL_DUMMY_DATA));
+    }
+
+    function getSyncUrl() { return state.syncApiUrl || setup.syncUrl || BAKED_SYNC_URL || ''; }
+
+    function saveState(skipCloudPush) {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+      renderApp();
+      if (!skipCloudPush && getSyncUrl()) pushStateToCloud();
+    }
+
+    // ================= CLOUD SYNC =================
+    async function pushStateToCloud() {
+      const url = getSyncUrl();
+      if (!url) return;
+      let payload;
+      if (APP_ROLE === 'member' && LOCKED_MEMBER) {
+        const m = LOCKED_MEMBER.toLowerCase();
+        payload = {
+          scope: 'member',
+          member: LOCKED_MEMBER,
+          channels: state.channels.filter(c => (c.member || '').toLowerCase() === m),
+          videos: state.videos.filter(v => (v.member || '').toLowerCase() === m)
+        };
+      } else {
+        payload = Object.assign({ scope: 'all' }, state);
+      }
+      try {
+        const badge = document.getElementById('cloudStatusBadge');
+        if (badge) { badge.textContent = 'Syncing...'; }
+        window._lastPushAt = Date.now();
+        await fetch(url, {
+          method: 'POST', mode: 'no-cors',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(payload)
+        });
+        if (badge) badge.textContent = 'Cloud Synced';
+      } catch (e) {}
+    }
+
+    function isTyping() {
+      const el = document.activeElement;
+      if (!el) return false;
+      const tag = (el.tagName || '').toLowerCase();
+      return tag === 'input' || tag === 'textarea' || tag === 'select';
+    }
+
+    async function pullStateFromCloud(force) {
+      const url = getSyncUrl();
+      if (!url) return;
+      // Don't clobber the sheet while the user is actively typing in a cell.
+      if (!force && isTyping()) return;
+      // Give our own just-pushed data a moment to land before pulling back.
+      if (!force && window._lastPushAt && (Date.now() - window._lastPushAt < 4000)) return;
+      try {
+        const badge = document.getElementById('cloudStatusBadge');
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data && Array.isArray(data.channels)) {
+          const keepUrl = getSyncUrl();
+          const keepSheet = state.sheetUrl;
+          state = data;
+          state.syncApiUrl = keepUrl || data.syncApiUrl || '';
+          state.sheetUrl = data.sheetUrl || keepSheet || '';
+          if (!Array.isArray(state.members)) state.members = [];
+          if (!Array.isArray(state.videos)) state.videos = [];
+          saveState(true);
+          if (badge) badge.textContent = 'Cloud Synced';
+        }
+      } catch (e) {}
+    }
+
+    function startAutoSync() {
+      if (window._autoSyncTimer) clearInterval(window._autoSyncTimer);
+      window._autoSyncTimer = setInterval(() => { if (getSyncUrl()) pullStateFromCloud(false); }, 12000);
+    }
+
+    function syncNowWithCloud() {
+      if (!getSyncUrl()) {
+        if (APP_ROLE === 'admin') openAdminBackend();
+        showToast('Add Cloud Sync URL in Admin Panel first');
+        return;
+      }
+      pullStateFromCloud(true);
+      showToast('Syncing now...');
+    }
+
+    function showToast(msg) {
+      const box = document.getElementById('toastBox');
+      const txt = document.getElementById('toastText');
+      if (!box || !txt) return;
+      txt.textContent = msg;
+      box.classList.remove('hidden');
+      clearTimeout(window._toastTimer);
+      window._toastTimer = setTimeout(() => box.classList.add('hidden'), 2200);
+    }
+
+    function esc(str) {
+      return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function safeUrl(u) {
+      const s = String(u || '').trim();
+      if (!s) return '#';
+      if (s.startsWith('http://') || s.startsWith('https://')) return s;
+      return 'https://' + s;
+    }
+
+    // ================= MEMBER FIRST-RUN SETUP =================
+    function showMemberSetup() {
+      const ov = document.getElementById('memberSetupOverlay');
+      ov.classList.remove('hidden');
+      const inp = document.getElementById('setupSyncUrl');
+      if (BAKED_SYNC_URL) {
+        // URL is baked in — skip the URL step, auto-connect, just ask for name.
+        if (inp) inp.value = BAKED_SYNC_URL;
+        const urlStep = document.getElementById('setupUrlStep');
+        if (urlStep) urlStep.classList.add('hidden');
+        setupConnect();
+      }
+    }
+
+    async function setupConnect() {
+      const url = (document.getElementById('setupSyncUrl').value || '').trim();
+      const msg = document.getElementById('setupMsg');
+      msg.textContent = '';
+      if (!url) { msg.textContent = 'Sync URL daalein.'; return; }
+      document.getElementById('setupConnectBtn').textContent = 'Connecting...';
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+        window._setupSyncUrl = url;
+        window._cloudMembers = (data && Array.isArray(data.members)) ? data.members : [];
+        const pick = document.getElementById('setupMemberPick');
+        pick.classList.remove('hidden');
+        const chips = document.getElementById('setupMemberChips');
+        chips.innerHTML = window._cloudMembers.length
+          ? window._cloudMembers.map(m => `<button type="button" onclick="document.getElementById('setupMemberName').value='${esc(m)}'" class="px-2 py-0.5 rounded bg-slate-100 border border-slate-300 text-xs font-semibold hover:bg-emerald-100">${esc(m)}</button>`).join('')
+          : '<span class="text-[11px] text-slate-400">Admin ne abhi members add nahi kiye — apna naam type karein.</span>';
+        msg.textContent = '';
+      } catch (e) {
+        msg.textContent = 'Connect nahi hua. URL check karein aur internet on rakhein.';
+      }
+      document.getElementById('setupConnectBtn').textContent = 'Connect';
+    }
+
+    function setupFinish() {
+      const name = (document.getElementById('setupMemberName').value || '').trim();
+      const msg = document.getElementById('setupMsg');
+      if (!name) { msg.textContent = 'Apna naam type karein ya chip click karein.'; return; }
+      setup.syncUrl = window._setupSyncUrl || (document.getElementById('setupSyncUrl').value || '').trim();
+      setup.member = name;
+      saveSetup();
+      LOCKED_MEMBER = name;
+      activeMember = name;
+      state.syncApiUrl = setup.syncUrl;
+      document.getElementById('memberSetupOverlay').classList.add('hidden');
+      renderApp();
+      pullStateFromCloud(true);
+      startAutoSync();
+      showToast('Setup complete — ' + name);
+    }
+
+    // ================= VIEW SWITCHES =================
+    function switchMemberView(memberName) {
+      if (LOCKED_MEMBER) return;
+      activeMember = memberName;
+      currentView = 'MEMBER_SHEET';
+      renderApp();
+    }
+    function openAdminBackend() {
+      if (APP_ROLE !== 'admin') return;
+      currentView = 'ADMIN_BACKEND';
+      renderApp();
+    }
+    function switchToMemberSheetFromAdmin(memberName) {
+      if (memberName) activeMember = memberName;
+      currentView = 'MEMBER_SHEET';
+      renderApp();
+    }
+
+    function renderApp() {
+      const viewMember = document.getElementById('viewMemberSheet');
+      const viewAdmin = document.getElementById('viewAdminBackend');
+      const btnBackend = document.getElementById('btnToggleBackend');
+      const switcherWrap = document.getElementById('memberSwitcherWrap');
+      const badge = document.getElementById('cloudStatusBadge');
+
+      if (badge && badge.textContent !== 'Syncing...') {
+        badge.textContent = getSyncUrl() ? 'Cloud Connected' : 'Local Mode';
+      }
+
+      // Admin-only controls are completely removed from the member build.
+      if (APP_ROLE !== 'admin') {
+        if (btnBackend) btnBackend.classList.add('hidden');
+      }
+
+      if (LOCKED_MEMBER) {
+        activeMember = LOCKED_MEMBER;
+        currentView = 'MEMBER_SHEET';
+        if (btnBackend) btnBackend.classList.add('hidden');
+        if (switcherWrap) switcherWrap.classList.add('hidden');
+        document.getElementById('headerTitle').textContent = LOCKED_MEMBER + ' — YouTube Tracker';
+      } else {
+        const sel = document.getElementById('selectActiveMember');
+        if (sel) {
+          sel.innerHTML = state.members.map(m =>
+            `<option value="${esc(m)}" ${m === activeMember ? 'selected' : ''}>${esc(m)}</option>`
+          ).join('');
+        }
+      }
+
+      if (currentView === 'ADMIN_BACKEND' && APP_ROLE === 'admin') {
+        viewMember.classList.add('hidden');
+        viewAdmin.classList.remove('hidden');
+        btnBackend.textContent = 'Admin Panel (Active)';
+        renderAdminBackend();
+      } else {
+        viewAdmin.classList.add('hidden');
+        viewMember.classList.remove('hidden');
+        if (btnBackend) btnBackend.textContent = 'Admin Panel';
+        renderMemberSheet();
+      }
+    }
+
+    // ================= RENDER MEMBER SHEET =================
+    function renderMemberSheet() {
+      document.getElementById('memberBadgeName').textContent = 'Member: ' + activeMember;
+
+      const myChannels = state.channels.filter(c => (c.member || '').toLowerCase() === activeMember.toLowerCase());
+      const q = (document.getElementById('memberSearchBox')?.value || '').toLowerCase().trim();
+      const myVideos = state.videos.filter(v => {
+        if ((v.member || '').toLowerCase() !== activeMember.toLowerCase()) return false;
+        if (!q) return true;
+        const hay = `${v.date} ${v.device} ${v.myChannelName} ${v.myChannelLink} ${v.compName} ${v.compLink} ${v.videoLink} ${v.status}`.toLowerCase();
+        return hay.includes(q);
+      });
+
+      const uploadedCount = myVideos.filter(v => v.status === 'Uploaded').length;
+      document.getElementById('memberStatsBadge').textContent = `Channels: ${myChannels.length} | Uploaded: ${uploadedCount} | Editing: ${myVideos.length - uploadedCount}`;
+
+      const devicesSet = new Set([ ...myChannels.map(c => c.device), ...myVideos.map(v => v.device) ].filter(Boolean));
+      document.getElementById('dlMemberDevices').innerHTML = Array.from(devicesSet).map(d => `<option value="${esc(d)}">`).join('');
+
+      const chNamesSet = new Set([ ...myChannels.map(c => c.myChannelName), ...myVideos.map(v => v.myChannelName) ].filter(Boolean));
+      document.getElementById('dlMemberChannels').innerHTML = Array.from(chNamesSet).map(n => `<option value="${esc(n)}">`).join('');
+
+      const compNamesSet = new Set();
+      myChannels.forEach(c => (c.competitors || []).forEach(cp => { if (cp.name) compNamesSet.add(cp.name); }));
+      myVideos.forEach(v => { if (v.compName) compNamesSet.add(v.compName); });
+      document.getElementById('dlMemberCompetitors').innerHTML = Array.from(compNamesSet).map(n => `<option value="${esc(n)}">`).join('');
+
+      const chBody = document.getElementById('memberChannelsSheetBody');
+
+      const draftCompsHtml = draftNewCompetitors.map((cp, cIdx) => `
+        <div class="flex items-center gap-1.5 mb-1">
+          <input type="text" value="${esc(cp.name)}" oninput="updateDraftComp(${cIdx}, 'name', this.value)" placeholder="Competitor Name" class="cell-input w-44" />
+          <input type="text" value="${esc(cp.link)}" oninput="updateDraftComp(${cIdx}, 'link', this.value)" placeholder="Competitor Link" class="cell-input flex-1" />
+          ${draftNewCompetitors.length > 1 ? `<button onclick="removeDraftComp(${cIdx})" class="px-1.5 py-0.5 text-rose-600 font-bold text-xs" title="Remove">✕</button>` : ''}
+        </div>
+      `).join('');
+
+      const addChannelRowHtml = `
+        <tr class="bg-emerald-50/70">
+          <td class="row-num text-emerald-700">+</td>
+          <td><input id="inChDevice" list="dlMemberDevices" type="text" placeholder="Device" class="cell-input" /></td>
+          <td><input id="inChName" type="text" placeholder="My Channel" class="cell-input font-semibold" /></td>
+          <td><input id="inChLink" type="text" placeholder="Channel Link" class="cell-input" /></td>
+          <td>
+            <div id="draftCompetitorsContainer">${draftCompsHtml}</div>
+            <button onclick="addMoreDraftComp()" class="mt-1 text-[11px] font-bold text-emerald-700 hover:underline">+ Add Competitor</button>
+          </td>
+          <td class="text-center align-middle">
+            <button onclick="saveMemberChannelRow()" class="px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-sm">Add</button>
+          </td>
+        </tr>
+      `;
+
+      const existingChannelRowsHtml = myChannels.map((c, idx) => {
+        const comps = Array.isArray(c.competitors) ? c.competitors : [];
+        const compsListHtml = comps.map((cp, cpIdx) => `
+          <div class="flex items-center gap-1.5 mb-1">
+            <input type="text" value="${esc(cp.name)}" onchange="updateSavedComp('${esc(c.id)}', ${cpIdx}, 'name', this.value)" placeholder="Competitor Name" class="cell-flat font-semibold text-amber-900 bg-amber-50/70 border border-amber-200 w-44" />
+            <input type="text" value="${esc(cp.link)}" onchange="updateSavedComp('${esc(c.id)}', ${cpIdx}, 'link', this.value)" placeholder="Competitor Link" class="cell-flat text-sky-700 bg-slate-50 border border-slate-200 flex-1" />
+            ${cp.link ? `<a href="${esc(safeUrl(cp.link))}" target="_blank" rel="noopener noreferrer" class="px-1.5 py-0.5 rounded bg-sky-100 text-sky-700 text-[11px] font-bold hover:bg-sky-200 shrink-0">↗</a>` : ''}
+            <button onclick="removeSavedComp('${esc(c.id)}', ${cpIdx})" class="px-1 text-slate-400 hover:text-rose-600 text-xs">✕</button>
+          </div>
+        `).join('');
+
+        return `
+          <tr>
+            <td class="row-num">${idx + 1}</td>
+            <td><input type="text" value="${esc(c.device)}" onchange="updateMemberChannelField('${esc(c.id)}', 'device', this.value)" class="cell-flat font-semibold text-indigo-700" /></td>
+            <td><input type="text" value="${esc(c.myChannelName)}" onchange="updateMemberChannelField('${esc(c.id)}', 'myChannelName', this.value)" class="cell-flat font-bold text-slate-900" /></td>
+            <td>
+              <div class="flex items-center gap-1">
+                <input type="text" value="${esc(c.myChannelLink)}" onchange="updateMemberChannelField('${esc(c.id)}', 'myChannelLink', this.value)" placeholder="Channel Link" class="cell-flat text-sky-700 flex-1" />
+                ${c.myChannelLink ? `<a href="${esc(safeUrl(c.myChannelLink))}" target="_blank" rel="noopener noreferrer" class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[11px] font-bold hover:bg-emerald-200 shrink-0">↗</a>` : ''}
+              </div>
+            </td>
+            <td>
+              ${compsListHtml}
+              <button onclick="addSavedComp('${esc(c.id)}')" class="mt-0.5 text-[11px] font-semibold text-indigo-600 hover:underline">+ Add Competitor</button>
+            </td>
+            <td class="text-center align-middle">
+              <button onclick="deleteMemberChannelRow('${esc(c.id)}')" class="text-rose-600 hover:text-rose-800 text-xs font-semibold">Delete</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      chBody.innerHTML = addChannelRowHtml + existingChannelRowsHtml;
+
+      const vidBody = document.getElementById('memberVideosSheetBody');
+      const today = new Date().toISOString().slice(0, 10);
+      const firstCh = myChannels[0] || null;
+      const firstComp = (firstCh && firstCh.competitors && firstCh.competitors[0]) ? firstCh.competitors[0] : { name: '', link: '' };
+
+      const addVideoRowHtml = `
+        <tr class="bg-emerald-50/70">
+          <td class="row-num text-emerald-700">+</td>
+          <td><input id="inVidDate" type="date" value="${today}" class="cell-input" /></td>
+          <td><input id="inVidDevice" list="dlMemberDevices" type="text" value="${esc(firstCh ? firstCh.device : '')}" placeholder="Device" class="cell-input font-semibold text-indigo-700" /></td>
+          <td><input id="inVidMyChName" list="dlMemberChannels" type="text" value="${esc(firstCh ? firstCh.myChannelName : '')}" oninput="autoFillFromMyChannel(this.value)" placeholder="My Channel" class="cell-input font-bold" /></td>
+          <td><input id="inVidMyChLink" type="text" value="${esc(firstCh ? firstCh.myChannelLink : '')}" placeholder="My Channel Link" class="cell-input text-sky-700" /></td>
+          <td><input id="inVidCompName" list="dlMemberCompetitors" type="text" value="${esc(firstComp.name)}" oninput="autoFillFromCompetitor(this.value)" placeholder="Competitor" class="cell-input font-semibold text-amber-900" /></td>
+          <td><input id="inVidCompLink" type="text" value="${esc(firstComp.link)}" placeholder="Competitor Link" class="cell-input text-sky-700" /></td>
+          <td><input id="inVidUrl" type="text" oninput="checkDuplicateVideoUrl(this.value)" onkeydown="if(event.key==='Enter') saveMemberVideoRow()" placeholder="Video Link / Title" class="cell-input" /></td>
+          <td>
+            <select id="inVidStatus" class="cell-input font-bold">
+              <option value="Editing">Editing</option>
+              <option value="Uploaded">Uploaded</option>
+            </select>
+          </td>
+          <td class="text-center align-middle">
+            <button onclick="saveMemberVideoRow()" class="px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-sm">Add</button>
+          </td>
+        </tr>
+      `;
+
+      const existingVideoRowsHtml = myVideos.map((v, idx) => {
+        const isUp = v.status === 'Uploaded';
+        return `
+          <tr>
+            <td class="row-num">${idx + 1}</td>
+            <td class="font-mono text-xs text-slate-600"><input type="date" value="${esc(v.date)}" onchange="updateMemberVideoField('${esc(v.id)}', 'date', this.value)" class="cell-flat font-mono text-xs" /></td>
+            <td><input type="text" value="${esc(v.device)}" onchange="updateMemberVideoField('${esc(v.id)}', 'device', this.value)" class="cell-flat font-semibold text-indigo-700" /></td>
+            <td><input type="text" value="${esc(v.myChannelName)}" onchange="updateMemberVideoField('${esc(v.id)}', 'myChannelName', this.value)" class="cell-flat font-bold text-slate-900" /></td>
+            <td>
+              <div class="flex items-center gap-1">
+                <input type="text" value="${esc(v.myChannelLink)}" onchange="updateMemberVideoField('${esc(v.id)}', 'myChannelLink', this.value)" class="cell-flat text-sky-700 flex-1" />
+                ${v.myChannelLink ? `<a href="${esc(safeUrl(v.myChannelLink))}" target="_blank" rel="noopener noreferrer" class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[11px] font-bold shrink-0">↗</a>` : ''}
+              </div>
+            </td>
+            <td><input type="text" value="${esc(v.compName)}" onchange="updateMemberVideoField('${esc(v.id)}', 'compName', this.value)" class="cell-flat font-semibold text-amber-900" /></td>
+            <td>
+              <div class="flex items-center gap-1">
+                <input type="text" value="${esc(v.compLink)}" onchange="updateMemberVideoField('${esc(v.id)}', 'compLink', this.value)" class="cell-flat text-sky-700 flex-1" />
+                ${v.compLink ? `<a href="${esc(safeUrl(v.compLink))}" target="_blank" rel="noopener noreferrer" class="px-1.5 py-0.5 rounded bg-sky-100 text-sky-700 text-[11px] font-bold shrink-0">↗</a>` : ''}
+              </div>
+            </td>
+            <td><input type="text" value="${esc(v.videoLink)}" onchange="updateMemberVideoField('${esc(v.id)}', 'videoLink', this.value)" class="cell-flat" /></td>
+            <td>
+              <select onchange="updateMemberVideoField('${esc(v.id)}', 'status', this.value)" class="px-2 py-1 rounded text-xs font-bold border cursor-pointer w-full ${isUp ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : 'bg-amber-100 text-amber-800 border-amber-300'}">
+                <option value="Editing" ${!isUp ? 'selected' : ''}>Editing</option>
+                <option value="Uploaded" ${isUp ? 'selected' : ''}>Uploaded</option>
+              </select>
+            </td>
+            <td class="text-center align-middle"><button onclick="deleteMemberVideoRow('${esc(v.id)}')" class="text-rose-600 hover:text-rose-800 text-xs font-semibold">Delete</button></td>
+          </tr>
+        `;
+      }).join('');
+
+      vidBody.innerHTML = addVideoRowHtml + existingVideoRowsHtml;
+    }
+
+    // ================= TABLE 1 HANDLERS =================
+    function preserveChannelDraftInputs() {
+      window._tempChDraft = {
+        device: document.getElementById('inChDevice')?.value || '',
+        name: document.getElementById('inChName')?.value || '',
+        link: document.getElementById('inChLink')?.value || ''
+      };
+    }
+    function restoreChannelDraftInputs() {
+      if (!window._tempChDraft) return;
+      if (document.getElementById('inChDevice')) document.getElementById('inChDevice').value = window._tempChDraft.device;
+      if (document.getElementById('inChName')) document.getElementById('inChName').value = window._tempChDraft.name;
+      if (document.getElementById('inChLink')) document.getElementById('inChLink').value = window._tempChDraft.link;
+    }
+    function updateDraftComp(idx, field, val) { if (draftNewCompetitors[idx]) draftNewCompetitors[idx][field] = val; }
+    function addMoreDraftComp() {
+      preserveChannelDraftInputs();
+      draftNewCompetitors.push({ name: '', link: '' });
+      renderMemberSheet();
+      restoreChannelDraftInputs();
+    }
+    function removeDraftComp(idx) {
+      preserveChannelDraftInputs();
+      draftNewCompetitors.splice(idx, 1);
+      if (draftNewCompetitors.length === 0) draftNewCompetitors.push({ name: '', link: '' });
+      renderMemberSheet();
+      restoreChannelDraftInputs();
+    }
+
+    function saveMemberChannelRow() {
+      const device = (document.getElementById('inChDevice')?.value || '').trim();
+      const myChannelName = (document.getElementById('inChName')?.value || '').trim();
+      const myChannelLink = (document.getElementById('inChLink')?.value || '').trim();
+      const validComps = draftNewCompetitors.map(c => ({ name: (c.name || '').trim(), link: (c.link || '').trim() })).filter(c => c.name || c.link);
+      if (!device || !myChannelName) { showToast('Enter Device and My Channel!'); return; }
+      state.channels.push({
+        id: 'CH-' + Date.now().toString().slice(-6),
+        member: activeMember, device, myChannelName, myChannelLink,
+        competitors: validComps.length ? validComps : [{ name: 'Competitor', link: '' }]
+      });
+      draftNewCompetitors = [{ name: '', link: '' }];
+      window._tempChDraft = null;
+      saveState();
+      showToast('Channel added');
+    }
+    function updateMemberChannelField(chId, field, value) {
+      const ch = state.channels.find(c => c.id === chId);
+      if (!ch) return;
+      ch[field] = value.trim(); saveState(); showToast('Saved');
+    }
+    function updateSavedComp(chId, cpIdx, field, value) {
+      const ch = state.channels.find(c => c.id === chId);
+      if (!ch || !ch.competitors || !ch.competitors[cpIdx]) return;
+      ch.competitors[cpIdx][field] = value.trim(); saveState(); showToast('Saved');
+    }
+    function addSavedComp(chId) {
+      const ch = state.channels.find(c => c.id === chId);
+      if (!ch) return;
+      if (!Array.isArray(ch.competitors)) ch.competitors = [];
+      ch.competitors.push({ name: '', link: '' }); saveState();
+    }
+    function removeSavedComp(chId, cpIdx) {
+      const ch = state.channels.find(c => c.id === chId);
+      if (!ch || !Array.isArray(ch.competitors)) return;
+      ch.competitors.splice(cpIdx, 1); saveState();
+    }
+    function deleteMemberChannelRow(chId) {
+      state.channels = state.channels.filter(c => c.id !== chId); saveState(); showToast('Deleted');
+    }
+
+    // ================= TABLE 2 HANDLERS =================
+    function autoFillFromMyChannel(typedName) {
+      const match = state.channels.find(c =>
+        (c.member || '').toLowerCase() === activeMember.toLowerCase() &&
+        (c.myChannelName || '').toLowerCase() === (typedName || '').toLowerCase().trim());
+      if (match) {
+        if (document.getElementById('inVidDevice')) document.getElementById('inVidDevice').value = match.device || '';
+        if (document.getElementById('inVidMyChLink')) document.getElementById('inVidMyChLink').value = match.myChannelLink || '';
+        if (match.competitors && match.competitors[0]) {
+          if (document.getElementById('inVidCompName')) document.getElementById('inVidCompName').value = match.competitors[0].name || '';
+          if (document.getElementById('inVidCompLink')) document.getElementById('inVidCompLink').value = match.competitors[0].link || '';
+        }
+      }
+    }
+    function autoFillFromCompetitor(typedCompName) {
+      const clean = (typedCompName || '').toLowerCase().trim();
+      if (!clean) return;
+      for (const ch of state.channels) {
+        if ((ch.member || '').toLowerCase() !== activeMember.toLowerCase()) continue;
+        const found = (ch.competitors || []).find(cp => (cp.name || '').toLowerCase().trim() === clean);
+        if (found && found.link) {
+          if (document.getElementById('inVidCompLink')) document.getElementById('inVidCompLink').value = found.link;
+          break;
+        }
+      }
+    }
+    function checkDuplicateVideoUrl(val) {
+      const clean = (val || '').toLowerCase().trim();
+      const bar = document.getElementById('dupAlertBar');
+      if (!clean || clean.length < 5) { bar.classList.add('hidden'); return; }
+      const exists = state.videos.some(v => (v.videoLink || '').toLowerCase().includes(clean));
+      if (exists) bar.classList.remove('hidden'); else bar.classList.add('hidden');
+    }
+    function saveMemberVideoRow() {
+      const date = document.getElementById('inVidDate')?.value || new Date().toISOString().slice(0, 10);
+      const device = (document.getElementById('inVidDevice')?.value || '').trim();
+      const myChannelName = (document.getElementById('inVidMyChName')?.value || '').trim();
+      const myChannelLink = (document.getElementById('inVidMyChLink')?.value || '').trim();
+      const compName = (document.getElementById('inVidCompName')?.value || '').trim();
+      const compLink = (document.getElementById('inVidCompLink')?.value || '').trim();
+      const videoLink = (document.getElementById('inVidUrl')?.value || '').trim();
+      const status = document.getElementById('inVidStatus')?.value || 'Editing';
+      if (!myChannelName || !compName || !videoLink) { showToast('Enter My Channel, Competitor, and Video Link!'); return; }
+      state.videos.unshift({
+        id: 'VID-' + Date.now().toString().slice(-6),
+        date, member: activeMember, device: device || 'Device',
+        myChannelName, myChannelLink, compName, compLink, videoLink, status
+      });
+      document.getElementById('dupAlertBar').classList.add('hidden');
+      saveState();
+      showToast('Video added');
+    }
+    function updateMemberVideoField(vidId, field, value) {
+      const v = state.videos.find(x => x.id === vidId);
+      if (!v) return;
+      v[field] = value; saveState(); showToast('Saved');
+    }
+    function deleteMemberVideoRow(vidId) {
+      state.videos = state.videos.filter(x => x.id !== vidId); saveState(); showToast('Deleted');
+    }
+
+    // ================= RENDER ADMIN PANEL =================
+    function renderAdminBackend() {
+      const reportBody = document.getElementById('adminMemberReportRows');
+      reportBody.innerHTML = state.members.map((m, idx) => {
+        const mCh = state.channels.filter(c => (c.member || '').toLowerCase() === m.toLowerCase());
+        const mVid = state.videos.filter(v => (v.member || '').toLowerCase() === m.toLowerCase());
+        const upCount = mVid.filter(v => v.status === 'Uploaded').length;
+        const edCount = mVid.length - upCount;
+        const devices = Array.from(new Set([ ...mCh.map(c => c.device), ...mVid.map(v => v.device) ].filter(Boolean)));
+        const chHtml = mCh.length
+          ? mCh.map(c => `<div class="mb-1"><strong>${esc(c.myChannelName)}</strong>${c.myChannelLink ? `<a href="${esc(safeUrl(c.myChannelLink))}" target="_blank" rel="noopener noreferrer" class="text-emerald-700 hover:underline text-[11px] ml-1">↗</a>` : ''}</div>`).join('')
+          : '<span class="text-slate-400">—</span>';
+        const compHtml = mCh.length
+          ? mCh.map(c => (c.competitors || []).map(cp => `<span class="inline-block mr-1 mb-1 px-1.5 py-0.5 rounded bg-amber-50 border border-amber-200 text-[11px]">${esc(cp.name)} ${cp.link ? `<a href="${esc(safeUrl(cp.link))}" target="_blank" rel="noopener noreferrer" class="text-sky-600 font-bold">↗</a>` : ''}</span>`).join('')).join('')
+          : '<span class="text-slate-400">—</span>';
+        return `
+          <tr>
+            <td class="row-num">${idx + 1}</td>
+            <td class="font-bold text-slate-900">${esc(m)}</td>
+            <td class="text-indigo-700 font-semibold text-xs">${esc(devices.join(', ') || '—')}</td>
+            <td class="text-xs">${chHtml}</td>
+            <td>${compHtml}</td>
+            <td><span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold">${upCount}</span></td>
+            <td><span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-bold">${edCount}</span></td>
+            <td><button onclick="switchToMemberSheetFromAdmin('${esc(m)}')" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold">Open</button></td>
+          </tr>
+        `;
+      }).join('');
+
+      const filterSel = document.getElementById('adminFilterMemberSelect');
+      const prevFilter = filterSel.value || 'ALL';
+      filterSel.innerHTML = `<option value="ALL">All Members</option>` +
+        state.members.map(m => `<option value="${esc(m)}" ${prevFilter === m ? 'selected' : ''}>${esc(m)}</option>`).join('');
+
+      const sheetInput = document.getElementById('adminSheetUrlInput');
+      if (sheetInput && document.activeElement !== sheetInput) sheetInput.value = state.sheetUrl || '';
+      const syncInput = document.getElementById('adminSyncApiInput');
+      if (syncInput && document.activeElement !== syncInput) syncInput.value = state.syncApiUrl || '';
+
+      const filteredChannels = state.channels.filter(c => prevFilter === 'ALL' || (c.member || '').toLowerCase() === prevFilter.toLowerCase());
+      const masterChBody = document.getElementById('adminMasterChannelsRows');
+      if (filteredChannels.length === 0) {
+        masterChBody.innerHTML = `<tr><td colspan="7" class="text-center py-4 text-slate-400">No channels found.</td></tr>`;
+      } else {
+        masterChBody.innerHTML = filteredChannels.map((c, idx) => {
+          const compsBadges = (c.competitors || []).map(cp => `<div class="mb-1"><span class="font-semibold text-amber-900">${esc(cp.name)}</span>${cp.link ? `<a href="${esc(safeUrl(cp.link))}" target="_blank" rel="noopener noreferrer" class="text-sky-600 hover:underline text-xs ml-1">${esc(cp.link)} ↗</a>` : ''}</div>`).join('');
+          return `
+            <tr>
+              <td class="row-num">${idx + 1}</td>
+              <td class="font-bold text-indigo-700">${esc(c.member)}</td>
+              <td class="font-semibold text-slate-800">${esc(c.device)}</td>
+              <td class="font-bold text-slate-900">${esc(c.myChannelName)}</td>
+              <td>${c.myChannelLink ? `<a href="${esc(safeUrl(c.myChannelLink))}" target="_blank" rel="noopener noreferrer" class="text-emerald-700 hover:underline text-xs">${esc(c.myChannelLink)} ↗</a>` : '—'}</td>
+              <td>${compsBadges}</td>
+              <td class="text-center"><button onclick="deleteMemberChannelRow('${esc(c.id)}')" class="text-rose-600 hover:text-rose-800 text-xs font-semibold">Delete</button></td>
+            </tr>
+          `;
+        }).join('');
+      }
+
+      const filteredVideos = state.videos.filter(v => prevFilter === 'ALL' || (v.member || '').toLowerCase() === prevFilter.toLowerCase());
+      const masterVidBody = document.getElementById('adminMasterVideosRows');
+      if (filteredVideos.length === 0) {
+        masterVidBody.innerHTML = `<tr><td colspan="9" class="text-center py-4 text-slate-400">No videos found.</td></tr>`;
+      } else {
+        masterVidBody.innerHTML = filteredVideos.map((v, idx) => {
+          const isUp = v.status === 'Uploaded';
+          return `
+            <tr>
+              <td class="row-num">${idx + 1}</td>
+              <td class="font-mono text-xs text-slate-600">${esc(v.date)}</td>
+              <td class="font-bold text-indigo-700">${esc(v.member)}</td>
+              <td class="font-semibold text-slate-800">${esc(v.device)}</td>
+              <td><div class="font-bold text-slate-900">${esc(v.myChannelName)}</div>${v.myChannelLink ? `<a href="${esc(safeUrl(v.myChannelLink))}" target="_blank" rel="noopener noreferrer" class="text-[11px] text-emerald-700 hover:underline">${esc(v.myChannelLink)} ↗</a>` : ''}</td>
+              <td><div class="font-semibold text-amber-900">${esc(v.compName)}</div>${v.compLink ? `<a href="${esc(safeUrl(v.compLink))}" target="_blank" rel="noopener noreferrer" class="text-[11px] text-sky-600 hover:underline">${esc(v.compLink)} ↗</a>` : ''}</td>
+              <td class="text-xs text-slate-800 break-all">${esc(v.videoLink)}</td>
+              <td><span class="px-2 py-0.5 rounded text-xs font-bold ${isUp ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}">${isUp ? 'Uploaded' : 'Editing'}</span></td>
+              <td class="text-center"><button onclick="deleteMemberVideoRow('${esc(v.id)}')" class="text-rose-600 hover:text-rose-800 text-xs font-semibold">Delete</button></td>
+            </tr>
+          `;
+        }).join('');
+      }
+    }
+
+    function addNewMemberInline() {
+      const inp = document.getElementById('newTeamMemberInput');
+      const name = (inp.value || '').trim();
+      if (!name) { showToast('Enter member name'); return; }
+      if (!state.members.some(m => m.toLowerCase() === name.toLowerCase())) state.members.push(name);
+      inp.value = '';
+      saveState();
+      showToast('Member added');
+    }
+
+    function saveCloudSyncUrl() {
+      state.syncApiUrl = (document.getElementById('adminSyncApiInput')?.value || '').trim();
+      setup.syncUrl = state.syncApiUrl; saveSetup();
+      saveState();
+      startAutoSync();
+      showToast('Cloud Sync URL saved');
+    }
+
+    function copyCloudScript() {
+      const scriptCode = CLOUD_SCRIPT_V2;
+      const ta = document.createElement('textarea');
+      ta.value = scriptCode;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); showToast('Cloud Sync Script copied!'); } catch (e) {}
+      document.body.removeChild(ta);
+    }
+
+    function saveAdminSheetLink() {
+      state.sheetUrl = (document.getElementById('adminSheetUrlInput')?.value || '').trim();
+      saveState(); showToast('Saved');
+    }
+    function openAdminSheetLink() {
+      const url = (document.getElementById('adminSheetUrlInput')?.value || state.sheetUrl || '').trim();
+      if (!url) { showToast('Enter Google Sheet URL first'); return; }
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+
+    function exportAllCSV() {
+      const isMemberView = currentView === 'MEMBER_SHEET' || Boolean(LOCKED_MEMBER);
+      const list = isMemberView ? state.videos.filter(v => (v.member || '').toLowerCase() === activeMember.toLowerCase()) : state.videos;
+      const headers = ['Date', 'Member', 'Device', 'My Channel', 'My Channel Link', 'Competitor', 'Competitor Link', 'Video Link / Title', 'Status'];
+      const rows = list.map(v => [v.date, v.member, v.device, v.myChannelName, v.myChannelLink, v.compName, v.compLink, v.videoLink, v.status]);
+      const csv = [headers, ...rows].map(r => r.map(cell => `"${String(cell || '').replace(/"/g, '""')}"`).join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = isMemberView ? `Sheet_${activeMember}.csv` : 'Master_Report.csv';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      showToast('CSV Exported');
+    }
+
+    function resetSampleData() {
+      if (APP_ROLE !== 'admin') return;
+      state = JSON.parse(JSON.stringify(INITIAL_DUMMY_DATA));
+      draftNewCompetitors = [{ name: '', link: '' }];
+      saveState();
+      showToast('Reset complete');
+    }
+
+    // ================= GOOGLE APPS SCRIPT (v2, per-member merge) =================
+    const CLOUD_SCRIPT_V2 = `function doPost(e) {
+  var lock = LockService.getScriptLock();
+  lock.tryLock(15000);
+  try {
+    var incoming = JSON.parse(e.postData.contents);
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var rawSheet = ss.getSheetByName('CloudData') || ss.insertSheet('CloudData');
+
+    var current = {};
+    try { var cur = rawSheet.getRange(1, 1).getValue(); if (cur) current = JSON.parse(cur); } catch (err) { current = {}; }
+    if (!current.members) current.members = [];
+    if (!current.channels) current.channels = [];
+    if (!current.videos) current.videos = [];
+
+    if (incoming.scope === 'member' && incoming.member) {
+      var m = String(incoming.member).toLowerCase();
+      var lower = current.members.map(function (x) { return String(x).toLowerCase(); });
+      if (lower.indexOf(m) === -1) current.members.push(incoming.member);
+      current.channels = current.channels.filter(function (c) { return String(c.member).toLowerCase() !== m; }).concat(incoming.channels || []);
+      current.videos = current.videos.filter(function (v) { return String(v.member).toLowerCase() !== m; }).concat(incoming.videos || []);
+    } else {
+      current.members = incoming.members || current.members;
+      current.channels = incoming.channels || [];
+      current.videos = incoming.videos || [];
+      if (incoming.sheetUrl !== undefined) current.sheetUrl = incoming.sheetUrl;
+    }
+
+    rawSheet.getRange(1, 1).setValue(JSON.stringify(current));
+    writeReadableTabs(ss, current);
+    return jsonOut({ status: 'ok' });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function doGet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('CloudData');
+  var val = sheet ? sheet.getRange(1, 1).getValue() : '{}';
+  return ContentService.createTextOutput(val || '{}').setMimeType(ContentService.MimeType.JSON);
+}
+
+function jsonOut(o) {
+  return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function writeReadableTabs(ss, data) {
+  var chSheet = ss.getSheetByName('Channels_Competitors') || ss.insertSheet('Channels_Competitors');
+  chSheet.clear();
+  var chHeaders = ['Member', 'Device', 'My Channel', 'My Channel Link', 'Competitors (Name & Link)'];
+  chSheet.getRange(1, 1, 1, chHeaders.length).setValues([chHeaders]).setFontWeight('bold');
+  var chRows = (data.channels || []).map(function (c) {
+    var comps = (c.competitors || []).map(function (cp) { return cp.name + ' (' + cp.link + ')'; }).join(' | ');
+    return [c.member || '', c.device || '', c.myChannelName || '', c.myChannelLink || '', comps];
+  });
+  if (chRows.length > 0) chSheet.getRange(2, 1, chRows.length, chHeaders.length).setValues(chRows);
+
+  var vidSheet = ss.getSheetByName('Daily_Videos') || ss.insertSheet('Daily_Videos');
+  vidSheet.clear();
+  var vidHeaders = ['Date', 'Member', 'Device', 'My Channel', 'My Channel Link', 'Competitor', 'Competitor Link', 'Video Link / Title', 'Status'];
+  vidSheet.getRange(1, 1, 1, vidHeaders.length).setValues([vidHeaders]).setFontWeight('bold');
+  var vidRows = (data.videos || []).map(function (v) {
+    return [v.date || '', v.member || '', v.device || '', v.myChannelName || '', v.myChannelLink || '', v.compName || '', v.compLink || '', v.videoLink || '', v.status || ''];
+  });
+  if (vidRows.length > 0) vidSheet.getRange(2, 1, vidRows.length, vidHeaders.length).setValues(vidRows);
+}`;
+
+    // ================= ADMIN LOCK =================
+    function showAdminLock() {
+      const ov = document.getElementById('adminLockOverlay');
+      ov.classList.remove('hidden');
+      setTimeout(() => { const i = document.getElementById('adminPassInput'); if (i) i.focus(); }, 100);
+    }
+    function adminUnlock() {
+      const v = document.getElementById('adminPassInput').value || '';
+      if (v === ADMIN_PASSWORD) {
+        document.getElementById('adminLockOverlay').classList.add('hidden');
+        startApp();
+      } else {
+        document.getElementById('adminLockMsg').textContent = 'Ghalat password. Dubara koshish karein.';
+      }
+    }
+
+    // ================= BOOT =================
+    function startApp() {
+      if (APP_ROLE === 'member' && !LOCKED_MEMBER) {
+        showMemberSetup();
+        return;
+      }
+      renderApp();
+      if (getSyncUrl()) {
+        pullStateFromCloud(true);
+        startAutoSync();
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      // Admin build is gated behind a password so only the admin can open it.
+      if (APP_ROLE === 'admin' && ADMIN_PASSWORD) {
+        showAdminLock();
+        return;
+      }
+      startApp();
+    });
+  </script>
+</body>
+</html>
