@@ -701,15 +701,26 @@
       const firstCh = myChannels[0] || null;
       const firstComp = (firstCh && firstCh.competitors && firstCh.competitors[0]) ? firstCh.competitors[0] : { name: '', link: '' };
 
+      const vidChOptions = myChannels.map(c => `<option value="${esc(c.myChannelName)}" ${firstCh && c.myChannelName === firstCh.myChannelName ? 'selected' : ''}>${esc(c.myChannelName)}</option>`).join('');
+      const firstCompOptions = ((firstCh && firstCh.competitors) || []).filter(cp => cp.name).map(cp => `<option value="${esc(cp.name)}">${esc(cp.name)}</option>`).join('');
+
       const addVideoRowHtml = `
         <tr class="bg-emerald-50/70">
           <td class="row-num text-emerald-700">+</td>
           <td><input id="inVidDate" type="date" value="${today}" class="cell-input" /></td>
-          <td><input id="inVidDevice" list="dlMemberDevices" type="text" value="${esc(firstCh ? firstCh.device : '')}" placeholder="Device" class="cell-input font-semibold text-indigo-700" /></td>
-          <td><input id="inVidMyChName" list="dlMemberChannels" type="text" value="${esc(firstCh ? firstCh.myChannelName : '')}" oninput="autoFillFromMyChannel(this.value)" placeholder="My Channel" class="cell-input font-bold" /></td>
-          <td><input id="inVidMyChLink" type="text" value="${esc(firstCh ? firstCh.myChannelLink : '')}" placeholder="My Channel Link" class="cell-input text-sky-700" /></td>
-          <td><input id="inVidCompName" list="dlMemberCompetitors" type="text" value="${esc(firstComp.name)}" oninput="autoFillFromCompetitor(this.value)" placeholder="Competitor" class="cell-input font-semibold text-amber-900" /></td>
-          <td><input id="inVidCompLink" type="text" value="${esc(firstComp.link)}" placeholder="Competitor Link" class="cell-input text-sky-700" /></td>
+          <td><input id="inVidDevice" type="text" value="${esc(firstCh ? firstCh.device : '')}" readonly title="Auto-filled from channel" class="cell-input bg-slate-100 font-semibold text-indigo-700" /></td>
+          <td>
+            <select id="inVidMyChName" onchange="onVidChannelSelected()" class="cell-input font-bold">
+              ${myChannels.length ? vidChOptions : '<option value="">— add a channel first —</option>'}
+            </select>
+          </td>
+          <td><input id="inVidMyChLink" type="text" value="${esc(firstCh ? firstCh.myChannelLink : '')}" readonly title="Auto-filled from channel" class="cell-input bg-slate-100 text-sky-700" /></td>
+          <td>
+            <select id="inVidCompName" onchange="onVidCompetitorSelected()" class="cell-input font-semibold text-amber-900">
+              ${firstCompOptions || '<option value="">(no competitor)</option>'}
+            </select>
+          </td>
+          <td><input id="inVidCompLink" type="text" value="${esc(firstComp.link)}" readonly title="Auto-filled from competitor" class="cell-input bg-slate-100 text-sky-700" /></td>
           <td><input id="inVidUrl" type="text" oninput="checkDuplicateVideoUrl(this.value)" onkeydown="if(event.key==='Enter') saveMemberVideoRow()" placeholder="Video Link / Title" class="cell-input" /></td>
           <td>
             <select id="inVidStatus" class="cell-input font-bold">
@@ -757,6 +768,42 @@
       }).join('');
 
       vidBody.innerHTML = addVideoRowHtml + existingVideoRowsHtml;
+      onVidChannelSelected();
+    }
+
+    // Daily Videos add-row: pick a channel from the dropdown -> auto-fill its
+    // device, link and competitors (competitor dropdown); member only adds the video link.
+    function onVidChannelSelected() {
+      const sel = document.getElementById('inVidMyChName');
+      if (!sel) return;
+      const chName = sel.value || '';
+      const ch = state.channels.find(c => (c.member || '').toLowerCase() === activeMember.toLowerCase() && c.myChannelName === chName);
+      const dev = document.getElementById('inVidDevice');
+      const link = document.getElementById('inVidMyChLink');
+      const compSel = document.getElementById('inVidCompName');
+      if (!ch) {
+        if (dev) dev.value = '';
+        if (link) link.value = '';
+        if (compSel) compSel.innerHTML = '<option value="">(no competitor)</option>';
+        onVidCompetitorSelected();
+        return;
+      }
+      if (dev) dev.value = ch.device || '';
+      if (link) link.value = ch.myChannelLink || '';
+      if (compSel) {
+        const comps = (ch.competitors || []).filter(cp => cp.name);
+        compSel.innerHTML = comps.length ? comps.map(cp => `<option value="${esc(cp.name)}">${esc(cp.name)}</option>`).join('') : '<option value="">(no competitor)</option>';
+      }
+      onVidCompetitorSelected();
+    }
+
+    function onVidCompetitorSelected() {
+      const chName = document.getElementById('inVidMyChName')?.value || '';
+      const compName = document.getElementById('inVidCompName')?.value || '';
+      const ch = state.channels.find(c => (c.member || '').toLowerCase() === activeMember.toLowerCase() && c.myChannelName === chName);
+      const cp = ((ch && ch.competitors) || []).find(x => x.name === compName);
+      const cl = document.getElementById('inVidCompLink');
+      if (cl) cl.value = cp ? (cp.link || '') : '';
     }
 
     // ================= TABLE 1 HANDLERS =================
