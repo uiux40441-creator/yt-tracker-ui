@@ -1084,6 +1084,12 @@ function writeReadableTabs(ss, data) {
     }
 
     window.addEventListener('DOMContentLoaded', () => {
+      // Member build: remove the Admin Panel button immediately (even behind the
+      // first-run setup overlay) so it is never visible or clickable.
+      if (APP_ROLE !== 'admin') {
+        const b = document.getElementById('btnToggleBackend');
+        if (b) b.remove();
+      }
       // Admin build is gated behind a password so only the admin can open it.
       if (APP_ROLE === 'admin' && ADMIN_PASSWORD) {
         showAdminLock();
