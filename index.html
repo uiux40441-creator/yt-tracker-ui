@@ -866,13 +866,35 @@
       const status = document.getElementById('inVidStatus')?.value || 'Editing';
       if (!myChannelName || !compName || !videoLink) { showToast('Enter My Channel, Competitor, and Video Link!'); return; }
       state.videos.unshift({
-        id: 'VID-' + Date.now().toString().slice(-6),
+        id: 'VID-' + Date.now().toString().slice(-6) + Math.floor(Math.random() * 90 + 10),
         date, member: activeMember, device: device || 'Device',
         myChannelName, myChannelLink, compName, compLink, videoLink, status
       });
+      // Auto-capture this channel/device/competitor into the Channels & Competitors
+      // reference table, so a member's setup always shows at the top.
+      captureChannelFromVideo(device, myChannelName, myChannelLink, compName, compLink);
       document.getElementById('dupAlertBar').classList.add('hidden');
       saveState();
       showToast('Video added');
+    }
+
+    function captureChannelFromVideo(device, chName, chLink, compName, compLink) {
+      if (!chName) return;
+      const lcM = activeMember.toLowerCase();
+      let ch = state.channels.find(c => (c.member || '').toLowerCase() === lcM && (c.myChannelName || '').toLowerCase() === chName.toLowerCase());
+      if (!ch) {
+        ch = { id: 'CH-' + Date.now().toString().slice(-6) + Math.floor(Math.random() * 90 + 10), member: activeMember, device: device || '', myChannelName: chName, myChannelLink: chLink || '', competitors: [] };
+        state.channels.push(ch);
+      } else {
+        if (device && !ch.device) ch.device = device;
+        if (chLink && !ch.myChannelLink) ch.myChannelLink = chLink;
+      }
+      if (compName) {
+        if (!Array.isArray(ch.competitors)) ch.competitors = [];
+        if (!ch.competitors.some(cp => (cp.name || '').toLowerCase() === compName.toLowerCase())) {
+          ch.competitors.push({ name: compName, link: compLink || '' });
+        }
+      }
     }
     function updateMemberVideoField(vidId, field, value) {
       const v = state.videos.find(x => x.id === vidId);
