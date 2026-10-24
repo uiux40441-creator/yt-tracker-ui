@@ -175,7 +175,7 @@
               <th>Competitors</th>
               <th>Uploaded</th>
               <th>Editing</th>
-              <th>Open</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody id="adminMemberReportRows"></tbody>
@@ -866,7 +866,12 @@
             <td>${compHtml}</td>
             <td><span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold">${upCount}</span></td>
             <td><span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-bold">${edCount}</span></td>
-            <td><button onclick="switchToMemberSheetFromAdmin('${esc(m)}')" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold">Open</button></td>
+            <td>
+              <div class="flex items-center gap-1.5">
+                <button onclick="switchToMemberSheetFromAdmin('${esc(m)}')" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold">Open</button>
+                <button onclick="deleteMember('${esc(m)}')" class="px-2.5 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold">Delete</button>
+              </div>
+            </td>
           </tr>
         `;
       }).join('');
@@ -934,6 +939,18 @@
       inp.value = '';
       saveState();
       showToast('Member added');
+    }
+
+    function deleteMember(name) {
+      if (APP_ROLE !== 'admin') return;
+      if (!window.confirm('Member "' + name + '" aur unka saara data (channels + videos) delete kar dein?')) return;
+      const lc = (name || '').toLowerCase();
+      state.members = state.members.filter(m => m.toLowerCase() !== lc);
+      state.channels = state.channels.filter(c => (c.member || '').toLowerCase() !== lc);
+      state.videos = state.videos.filter(v => (v.member || '').toLowerCase() !== lc);
+      if ((activeMember || '').toLowerCase() === lc) activeMember = state.members[0] || '';
+      saveState();
+      showToast('Member deleted: ' + name);
     }
 
     function saveCloudSyncUrl() {
