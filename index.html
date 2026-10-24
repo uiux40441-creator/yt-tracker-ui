@@ -331,6 +331,13 @@
     function savePendingDel() { try { localStorage.setItem(PENDING_DEL_KEY, JSON.stringify(pendingDel)); } catch (e) {} }
     let pendingDel = loadPendingDel();
 
+    // Hidden ids: for MEMBER apps, a "delete" only hides the row from that
+    // member's own view — the cloud/Sheet record is kept. Admin deletes are real.
+    const HIDDEN_KEY = STORAGE_KEY + '_hidden';
+    function loadHidden() { try { const h = JSON.parse(localStorage.getItem(HIDDEN_KEY)); if (h && Array.isArray(h.channels)) return h; } catch (e) {} return { channels: [], videos: [] }; }
+    function saveHidden() { try { localStorage.setItem(HIDDEN_KEY, JSON.stringify(hiddenIds)); } catch (e) {} }
+    let hiddenIds = loadHidden();
+
     let activeMember = LOCKED_MEMBER || (state.members[0] || 'Ali');
     let currentView = 'MEMBER_SHEET';
     let draftNewCompetitors = [{ name: '', link: '' }];
@@ -604,10 +611,11 @@
     function renderMemberSheet() {
       document.getElementById('memberBadgeName').textContent = 'Member: ' + activeMember;
 
-      const myChannels = state.channels.filter(c => (c.member || '').toLowerCase() === activeMember.toLowerCase());
+      const myChannels = state.channels.filter(c => (c.member || '').toLowerCase() === activeMember.toLowerCase() && !hiddenIds.channels.includes(c.id));
       const q = (document.getElementById('memberSearchBox')?.value || '').toLowerCase().trim();
       const myVideos = state.videos.filter(v => {
         if ((v.member || '').toLowerCase() !== activeMember.toLowerCase()) return false;
+        if (hiddenIds.videos.includes(v.id)) return false;
         if (!q) return true;
         const hay = `${v.date} ${v.device} ${v.myChannelName} ${v.myChannelLink} ${v.compName} ${v.compLink} ${v.videoLink} ${v.status}`.toLowerCase();
         return hay.includes(q);
@@ -818,8 +826,14 @@
       ch.competitors.splice(cpIdx, 1); saveState();
     }
     function deleteMemberChannelRow(chId) {
-      if (!pendingDel.channels.includes(chId)) pendingDel.channels.push(chId); savePendingDel();
-      state.channels = state.channels.filter(c => c.id !== chId); saveState(); showToast('Deleted');
+      if (APP_ROLE === 'admin') {
+        if (!pendingDel.channels.includes(chId)) pendingDel.channels.push(chId); savePendingDel();
+        state.channels = state.channels.filter(c => c.id !== chId); saveState(); showToast('Deleted');
+      } else {
+        // Member: hide from own view only; the cloud/Sheet record stays.
+        if (!hiddenIds.channels.includes(chId)) hiddenIds.channels.push(chId); saveHidden();
+        renderApp(); showToast('Hidden from your view');
+      }
     }
 
     // ================= TABLE 2 HANDLERS =================
@@ -902,8 +916,14 @@
       v[field] = value; saveState(); showToast('Saved');
     }
     function deleteMemberVideoRow(vidId) {
-      if (!pendingDel.videos.includes(vidId)) pendingDel.videos.push(vidId); savePendingDel();
-      state.videos = state.videos.filter(x => x.id !== vidId); saveState(); showToast('Deleted');
+      if (APP_ROLE === 'admin') {
+        if (!pendingDel.videos.includes(vidId)) pendingDel.videos.push(vidId); savePendingDel();
+        state.videos = state.videos.filter(x => x.id !== vidId); saveState(); showToast('Deleted');
+      } else {
+        // Member: hide from own view only; the cloud/Sheet record stays.
+        if (!hiddenIds.videos.includes(vidId)) hiddenIds.videos.push(vidId); saveHidden();
+        renderApp(); showToast('Hidden from your view');
+      }
     }
 
     // ================= RENDER ADMIN PANEL =================
