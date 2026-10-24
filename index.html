@@ -323,6 +323,14 @@
     let state = loadState();
     if (setup.syncUrl && !state.syncApiUrl) state.syncApiUrl = setup.syncUrl;
 
+    // Pending deletes: ids/members deleted locally but maybe not yet applied to
+    // cloud. Sent on every push and cleared once the cloud reflects them, so a
+    // delete propagates and a record is never lost or resurrected.
+    const PENDING_DEL_KEY = STORAGE_KEY + '_pendingdel';
+    function loadPendingDel() { try { const p = JSON.parse(localStorage.getItem(PENDING_DEL_KEY)); if (p && Array.isArray(p.channels)) return p; } catch (e) {} return { channels: [], videos: [], members: [] }; }
+    function savePendingDel() { try { localStorage.setItem(PENDING_DEL_KEY, JSON.stringify(pendingDel)); } catch (e) {} }
+    let pendingDel = loadPendingDel();
+
     let activeMember = LOCKED_MEMBER || (state.members[0] || 'Ali');
     let currentView = 'MEMBER_SHEET';
     let draftNewCompetitors = [{ name: '', link: '' }];
@@ -353,14 +361,26 @@
       let payload;
       if (APP_ROLE === 'member' && LOCKED_MEMBER) {
         const m = LOCKED_MEMBER.toLowerCase();
+        // Member upserts only its own records + sends its own pending deletes.
         payload = {
-          scope: 'member',
           member: LOCKED_MEMBER,
+          members: [LOCKED_MEMBER],
           channels: state.channels.filter(c => (c.member || '').toLowerCase() === m),
-          videos: state.videos.filter(v => (v.member || '').toLowerCase() === m)
+          videos: state.videos.filter(v => (v.member || '').toLowerCase() === m),
+          delChannels: pendingDel.channels,
+          delVideos: pendingDel.videos
         };
       } else {
-        payload = Object.assign({ scope: 'all' }, state);
+        // Admin upserts everything it holds + sends pending deletes (incl members).
+        payload = {
+          members: state.members,
+          channels: state.channels,
+          videos: state.videos,
+          sheetUrl: state.sheetUrl,
+          delChannels: pendingDel.channels,
+          delVideos: pendingDel.videos,
+          delMembers: pendingDel.members
+        };
       }
       try {
         const badge = document.getElementById('cloudStatusBadge');
@@ -396,11 +416,31 @@
         if (data && Array.isArray(data.channels)) {
           const keepUrl = getSyncUrl();
           const keepSheet = state.sheetUrl;
+          const prevCh = Array.isArray(state.channels) ? state.channels : [];
+          const prevVid = Array.isArray(state.videos) ? state.videos : [];
+          const cloudCh = data.channels;
+          const cloudVid = Array.isArray(data.videos) ? data.videos : [];
+          const chIds = new Set(cloudCh.map(c => c.id));
+          const vidIds = new Set(cloudVid.map(v => v.id));
+          const del = data.deleted || { channels: [], videos: [], members: [] };
+          const delCh = new Set(del.channels || []);
+          const delVid = new Set(del.videos || []);
+          const delMem = new Set((del.members || []).map(x => String(x).toLowerCase()));
+          // Keep local records not yet in the cloud (just-added, not yet synced),
+          // but never resurrect tombstoned or locally-pending-deleted ones.
+          const localOnlyCh = prevCh.filter(c => !chIds.has(c.id) && !pendingDel.channels.includes(c.id) && !delCh.has(c.id) && !delMem.has(String(c.member).toLowerCase()));
+          const localOnlyVid = prevVid.filter(v => !vidIds.has(v.id) && !pendingDel.videos.includes(v.id) && !delVid.has(v.id) && !delMem.has(String(v.member).toLowerCase()));
           state = data;
-          state.syncApiUrl = keepUrl || data.syncApiUrl || '';
+          state.channels = cloudCh.concat(localOnlyCh);
+          state.videos = cloudVid.concat(localOnlyVid);
+          state.syncApiUrl = keepUrl || '';
           state.sheetUrl = data.sheetUrl || keepSheet || '';
           if (!Array.isArray(state.members)) state.members = [];
-          if (!Array.isArray(state.videos)) state.videos = [];
+          // Drop pending deletes the cloud has already applied (id gone from cloud).
+          pendingDel.channels = pendingDel.channels.filter(id => chIds.has(id));
+          pendingDel.videos = pendingDel.videos.filter(id => vidIds.has(id));
+          pendingDel.members = pendingDel.members.filter(n => (data.members || []).some(m => (m || '').toLowerCase() === (n || '').toLowerCase()));
+          savePendingDel();
           saveState(true);
           if (badge) badge.textContent = 'Cloud Synced';
         }
@@ -778,6 +818,7 @@
       ch.competitors.splice(cpIdx, 1); saveState();
     }
     function deleteMemberChannelRow(chId) {
+      if (!pendingDel.channels.includes(chId)) pendingDel.channels.push(chId); savePendingDel();
       state.channels = state.channels.filter(c => c.id !== chId); saveState(); showToast('Deleted');
     }
 
@@ -839,6 +880,7 @@
       v[field] = value; saveState(); showToast('Saved');
     }
     function deleteMemberVideoRow(vidId) {
+      if (!pendingDel.videos.includes(vidId)) pendingDel.videos.push(vidId); savePendingDel();
       state.videos = state.videos.filter(x => x.id !== vidId); saveState(); showToast('Deleted');
     }
 
@@ -945,6 +987,11 @@
       if (APP_ROLE !== 'admin') return;
       if (!window.confirm('Member "' + name + '" aur unka saara data (channels + videos) delete kar dein?')) return;
       const lc = (name || '').toLowerCase();
+      // Tombstone the member and all their records so the deletion propagates.
+      if (!pendingDel.members.includes(name)) pendingDel.members.push(name);
+      state.channels.filter(c => (c.member || '').toLowerCase() === lc).forEach(c => { if (!pendingDel.channels.includes(c.id)) pendingDel.channels.push(c.id); });
+      state.videos.filter(v => (v.member || '').toLowerCase() === lc).forEach(v => { if (!pendingDel.videos.includes(v.id)) pendingDel.videos.push(v.id); });
+      savePendingDel();
       state.members = state.members.filter(m => m.toLowerCase() !== lc);
       state.channels = state.channels.filter(c => (c.member || '').toLowerCase() !== lc);
       state.videos = state.videos.filter(v => (v.member || '').toLowerCase() !== lc);
@@ -1003,41 +1050,65 @@
       showToast('Reset complete');
     }
 
-    // ================= GOOGLE APPS SCRIPT (v2, per-member merge) =================
+    // ================= GOOGLE APPS SCRIPT (v3, merge-safe, no data loss) =================
     const CLOUD_SCRIPT_V2 = `function doPost(e) {
   var lock = LockService.getScriptLock();
-  lock.tryLock(15000);
+  lock.tryLock(20000);
   try {
-    var incoming = JSON.parse(e.postData.contents);
+    var inc = JSON.parse(e.postData.contents);
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var rawSheet = ss.getSheetByName('CloudData') || ss.insertSheet('CloudData');
+    var raw = ss.getSheetByName('CloudData') || ss.insertSheet('CloudData');
 
-    var current = {};
-    try { var cur = rawSheet.getRange(1, 1).getValue(); if (cur) current = JSON.parse(cur); } catch (err) { current = {}; }
-    if (!current.members) current.members = [];
-    if (!current.channels) current.channels = [];
-    if (!current.videos) current.videos = [];
+    var cur = {};
+    try { var s = raw.getRange(1, 1).getValue(); if (s) cur = JSON.parse(s); } catch (err) { cur = {}; }
+    if (!cur.members) cur.members = [];
+    if (!cur.channels) cur.channels = [];
+    if (!cur.videos) cur.videos = [];
+    if (!cur.deleted) cur.deleted = { channels: [], videos: [], members: [] };
 
-    if (incoming.scope === 'member' && incoming.member) {
-      var m = String(incoming.member).toLowerCase();
-      var lower = current.members.map(function (x) { return String(x).toLowerCase(); });
-      if (lower.indexOf(m) === -1) current.members.push(incoming.member);
-      current.channels = current.channels.filter(function (c) { return String(c.member).toLowerCase() !== m; }).concat(incoming.channels || []);
-      current.videos = current.videos.filter(function (v) { return String(v.member).toLowerCase() !== m; }).concat(incoming.videos || []);
-    } else {
-      current.members = incoming.members || current.members;
-      current.channels = incoming.channels || [];
-      current.videos = incoming.videos || [];
-      if (incoming.sheetUrl !== undefined) current.sheetUrl = incoming.sheetUrl;
-    }
+    (inc.delChannels || []).forEach(function (id) { if (cur.deleted.channels.indexOf(id) < 0) cur.deleted.channels.push(id); });
+    (inc.delVideos || []).forEach(function (id) { if (cur.deleted.videos.indexOf(id) < 0) cur.deleted.videos.push(id); });
+    (inc.delMembers || []).forEach(function (n) { var lc = String(n).toLowerCase(); if (cur.deleted.members.indexOf(lc) < 0) cur.deleted.members.push(lc); });
 
-    rawSheet.getRange(1, 1).setValue(JSON.stringify(current));
-    writeReadableTabs(ss, current);
-    return jsonOut({ status: 'ok' });
+    var delCh = toSet(cur.deleted.channels);
+    var delVid = toSet(cur.deleted.videos);
+    var delMem = toSet(cur.deleted.members);
+
+    var mlc = {};
+    cur.members.forEach(function (m) { mlc[String(m).toLowerCase()] = true; });
+    (inc.members || []).forEach(function (m) {
+      var lc = String(m).toLowerCase();
+      if (!mlc[lc] && !delMem[lc]) { cur.members.push(m); mlc[lc] = true; }
+    });
+
+    cur.channels = upsertById(cur.channels, (inc.channels || []).filter(function (c) { return c && !delCh[c.id]; }));
+    cur.videos = upsertById(cur.videos, (inc.videos || []).filter(function (v) { return v && !delVid[v.id]; }));
+
+    cur.channels = cur.channels.filter(function (c) { return !delCh[c.id] && !delMem[String(c.member).toLowerCase()]; });
+    cur.videos = cur.videos.filter(function (v) { return !delVid[v.id] && !delMem[String(v.member).toLowerCase()]; });
+    cur.members = cur.members.filter(function (m) { return !delMem[String(m).toLowerCase()]; });
+
+    if (inc.sheetUrl !== undefined) cur.sheetUrl = inc.sheetUrl;
+
+    raw.getRange(1, 1).setValue(JSON.stringify(cur));
+    writeReadableTabs(ss, cur);
+    return jsonOut({ status: 'ok', channels: cur.channels.length, videos: cur.videos.length });
   } finally {
     lock.releaseLock();
   }
 }
+
+function upsertById(arr, items) {
+  var idx = {};
+  arr.forEach(function (x, i) { if (x && x.id !== undefined) idx[x.id] = i; });
+  items.forEach(function (it) {
+    if (it && it.id !== undefined && idx[it.id] !== undefined) arr[idx[it.id]] = it;
+    else if (it && it.id !== undefined) { idx[it.id] = arr.length; arr.push(it); }
+  });
+  return arr;
+}
+
+function toSet(a) { var s = {}; (a || []).forEach(function (x) { s[x] = true; }); return s; }
 
 function doGet() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
