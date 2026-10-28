@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>YouTube Channel Tracker</title>
   <!-- Offline: Tailwind precompiled locally (no CDN) -->
-  <link rel="stylesheet" href="tailwind.css?v=2">
+  <link rel="stylesheet" href="tailwind.css?v=3">
   <style>
     /* Offline: Inter font bundled locally (no Google Fonts) */
     @font-face { font-family: 'Inter'; font-style: normal; font-weight: 400; font-display: swap; src: url('fonts/inter-400.woff2') format('woff2'); }
@@ -89,6 +89,7 @@
               <th style="min-width: 170px;">My Channel</th>
               <th style="min-width: 210px;">My Channel Link</th>
               <th style="min-width: 420px;">Competitors (Name &amp; Link)</th>
+              <th style="min-width: 170px;">Niche</th>
               <th style="width: 85px; text-align: center;">Action</th>
             </tr>
           </thead>
@@ -104,6 +105,11 @@
       </div>
 
       <div id="dupAlertBar" class="hidden bg-red-600 text-white text-xs font-bold px-4 py-2 rounded shadow">Duplicate video link already exists!</div>
+
+      <div id="vidChannelNote" class="hidden bg-amber-50 border border-amber-300 text-amber-900 text-xs sm:text-sm px-4 py-2.5 rounded-lg shadow-sm">
+        <span class="font-bold">📌 Niche — <span id="vidNoteChannel"></span>:</span>
+        <span id="vidNoteText" class="whitespace-pre-wrap"></span>
+      </div>
 
       <div class="overflow-x-auto shadow-sm rounded-lg border border-slate-300 bg-white">
         <table class="sheet-table">
@@ -655,6 +661,7 @@
             <div id="draftCompetitorsContainer">${draftCompsHtml}</div>
             <button onclick="addMoreDraftComp()" class="mt-1 text-[11px] font-bold text-emerald-700 hover:underline">+ Add Competitor</button>
           </td>
+          <td><textarea id="inChNote" rows="2" placeholder="Niche (e.g. NBA, History)" class="cell-input" style="resize: vertical;"></textarea></td>
           <td class="text-center align-middle">
             <button onclick="saveMemberChannelRow()" class="px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-sm">Add</button>
           </td>
@@ -687,6 +694,7 @@
               ${compsListHtml}
               <button onclick="addSavedComp('${esc(c.id)}')" class="mt-0.5 text-[11px] font-semibold text-indigo-600 hover:underline">+ Add Competitor</button>
             </td>
+            <td><textarea rows="2" onchange="updateMemberChannelField('${esc(c.id)}', 'niche', this.value)" placeholder="Niche (e.g. NBA, History)" class="cell-flat" style="resize: vertical;">${esc(c.niche || '')}</textarea></td>
             <td class="text-center align-middle">
               <button onclick="deleteMemberChannelRow('${esc(c.id)}')" class="text-rose-600 hover:text-rose-800 text-xs font-semibold">Delete</button>
             </td>
@@ -781,10 +789,12 @@
       const dev = document.getElementById('inVidDevice');
       const link = document.getElementById('inVidMyChLink');
       const compSel = document.getElementById('inVidCompName');
+      const noteBox = document.getElementById('vidChannelNote');
       if (!ch) {
         if (dev) dev.value = '';
         if (link) link.value = '';
         if (compSel) compSel.innerHTML = '<option value="">(no competitor)</option>';
+        if (noteBox) noteBox.classList.add('hidden');
         onVidCompetitorSelected();
         return;
       }
@@ -793,6 +803,17 @@
       if (compSel) {
         const comps = (ch.competitors || []).filter(cp => cp.name);
         compSel.innerHTML = comps.length ? comps.map(cp => `<option value="${esc(cp.name)}">${esc(cp.name)}</option>`).join('') : '<option value="">(no competitor)</option>';
+      }
+      // Show this channel's niche clearly below the form.
+      if (noteBox) {
+        const niche = (ch.niche || '').trim();
+        if (niche) {
+          document.getElementById('vidNoteChannel').textContent = ch.myChannelName || '';
+          document.getElementById('vidNoteText').textContent = niche;
+          noteBox.classList.remove('hidden');
+        } else {
+          noteBox.classList.add('hidden');
+        }
       }
       onVidCompetitorSelected();
     }
@@ -811,7 +832,8 @@
       window._tempChDraft = {
         device: document.getElementById('inChDevice')?.value || '',
         name: document.getElementById('inChName')?.value || '',
-        link: document.getElementById('inChLink')?.value || ''
+        link: document.getElementById('inChLink')?.value || '',
+        note: document.getElementById('inChNote')?.value || ''
       };
     }
     function restoreChannelDraftInputs() {
@@ -819,6 +841,7 @@
       if (document.getElementById('inChDevice')) document.getElementById('inChDevice').value = window._tempChDraft.device;
       if (document.getElementById('inChName')) document.getElementById('inChName').value = window._tempChDraft.name;
       if (document.getElementById('inChLink')) document.getElementById('inChLink').value = window._tempChDraft.link;
+      if (document.getElementById('inChNote')) document.getElementById('inChNote').value = window._tempChDraft.note;
     }
     function updateDraftComp(idx, field, val) { if (draftNewCompetitors[idx]) draftNewCompetitors[idx][field] = val; }
     function addMoreDraftComp() {
@@ -839,11 +862,12 @@
       const device = (document.getElementById('inChDevice')?.value || '').trim();
       const myChannelName = (document.getElementById('inChName')?.value || '').trim();
       const myChannelLink = (document.getElementById('inChLink')?.value || '').trim();
+      const note = (document.getElementById('inChNote')?.value || '').trim();
       const validComps = draftNewCompetitors.map(c => ({ name: (c.name || '').trim(), link: (c.link || '').trim() })).filter(c => c.name || c.link);
       if (!device || !myChannelName) { showToast('Enter Device and My Channel!'); return; }
       state.channels.push({
-        id: 'CH-' + Date.now().toString().slice(-6),
-        member: activeMember, device, myChannelName, myChannelLink,
+        id: 'CH-' + Date.now().toString().slice(-6) + Math.floor(Math.random() * 90 + 10),
+        member: activeMember, device, myChannelName, myChannelLink, niche: note,
         competitors: validComps.length ? validComps : [{ name: 'Competitor', link: '' }]
       });
       draftNewCompetitors = [{ name: '', link: '' }];
